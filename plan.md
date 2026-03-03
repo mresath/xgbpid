@@ -1,5 +1,5 @@
 - [x] Add core setup and data processing (daq, inference, processor)
-- [ ] Add loop (main)
+- [x] Add loop (main)
 - [ ] Add training script (train)
 - [ ] Add localdashboard independent of main loop (dashboard) 
 - [ ] Brainstrom, implement and add online publishing

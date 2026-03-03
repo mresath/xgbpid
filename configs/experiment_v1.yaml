@@ -1,0 +1,42 @@
+# All timing values are in nanoseconds unless noted.
+
+hardware:
+  host: "192.168.1.100"     # Red Pitaya IP on the lab network
+  port: 5000
+  channel: "CH1"
+  decimation: 1             # 1 = full 125 MHz sample rate (8 ns/sample)
+  buffer_size: 1024         # Samples per acquisition
+  trigger_level: 0.1        # V — threshold for TLU trigger detection
+  trigger_delay: 0          # Samples to store before trigger point
+
+simulation:
+  use_simulation: true      # Set false when Red Pitaya is physically connected
+  sample_rate_mhz: 125.0
+  noise_sigma_frac: 0.02    # 2% of peak amplitude
+  electron_fraction: 0.08   # ~8% electrons at typical T9 momenta (rest are pions)
+  onset_jitter_samples: 5   # Uniform ±N samples of timing jitter on the pulse onset
+
+pulse_shapes:
+  electron:
+    amplitude_v: 0.8
+    amplitude_spread_frac: 0.10   # Gaussian spread — EM showers are relatively uniform
+    rise_ns: 1.5
+    decay_ns: 20.0
+  pion:
+    amplitude_v: 0.6
+    amplitude_spread_frac: 0.30   # LogNormal spread — Landau distribution for MIPs
+    rise_ns: 3.0
+    decay_ns: 45.0
+
+model:
+  path: "models/xgb_pid.json"
+  labels:
+    0: "pion"
+    1: "electron"
+  confidence_threshold: 0.70
+
+processing:
+  pileup_threshold_v: 0.050   # Minimum voltage for a real pulse (V); tune to noise floor at CERN
+  rise_low_frac: 0.10          # Lower bound for rise-time measurement (fraction of peak)
+  rise_high_frac: 0.90         # Upper bound for rise-time measurement
+  baseline_window: 50          # Number of pre-trigger samples used to estimate baseline

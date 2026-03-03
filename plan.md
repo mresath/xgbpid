@@ -1,4 +1,4 @@
-- [ ] Add core setup and data processing (daq, inference, processor)
+- [x] Add core setup and data processing (daq, inference, processor)
 - [ ] Add loop (main)
 - [ ] Add training script (train)
 - [ ] Add localdashboard independent of main loop (dashboard) 

@@ -150,7 +150,7 @@ def run(cfg: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="BL4S AI PID — T9 beamline acquisition")
+    parser = argparse.ArgumentParser(description="XGBPID — T9 beamline acquisition")
     parser.add_argument(
         "--config",
         default="configs/experiment_v1.yaml",

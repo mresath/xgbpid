@@ -1,6 +1,6 @@
 - [x] Add core setup and data processing (daq, inference, processor)
 - [x] Add loop (main)
-- [ ] Add training script (train)
-- [ ] Add localdashboard independent of main loop (dashboard) 
+- [x] Add training script (train)
+- [ ] Add localdashboard independent of main loop (dashboard)
 - [ ] Brainstrom, implement and add online publishing
 - [ ] Add more particle types if found feasible

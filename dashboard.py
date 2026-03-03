@@ -23,7 +23,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import yaml
 
-_LATENCY_BUDGET_US = 1_000.0   # µs — physics budget, not user-configurable
+_LATENCY_BUDGET_US = 1_000.0   # µs — not user-configurable
 _PARTICLE_COLORS   = {"electron": "#4C9BE8", "pion": "#E8704C"}
 
 
@@ -32,8 +32,6 @@ def _load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-# Parsed once at module level so Streamlit doesn't re-run the argparse on every
-# render cycle.  Streamlit injects its own flags; parse_known_args discards them.
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument(
@@ -233,14 +231,14 @@ def main() -> None:
         )
         auto_refresh = st.checkbox("Auto-refresh", value=True)
 
-    st.title("XGBPID — Live Run Monitor")
+    st.title("XGBPID — Live Monitor")
     st.caption(f"Telemetry file: `{telemetry_path}`")
 
     df = _load(telemetry_path)
 
     if df is None or len(df) == 0:
         st.info(
-            "⏳ Waiting for telemetry data…\n\n"
+            "Waiting for telemetry data…\n\n"
             "Start `python main.py` and the dashboard will populate "
             f"after the first {50} events are flushed.",
             icon="📡",

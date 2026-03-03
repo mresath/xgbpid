@@ -2,6 +2,7 @@
 - [x] Add loop (main)
 - [x] Add training script (train)
 - [x] Add local dashboard independent of main loop (dashboard)
-- [ ] Script that launches both files simulatenously
+- [x] Script that launches both files simulatenously
+- [ ] Clean readme for what exists so far
 - [ ] Brainstorm, outline and implement online publishing
 - [ ] Add more particle types if found feasible

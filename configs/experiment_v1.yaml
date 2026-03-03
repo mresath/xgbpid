@@ -50,3 +50,8 @@ dashboard:
   latency_window_events: 500   # default number of events in rolling latency plot
   flush_interval: 50           # write live_telemetry.parquet every N accepted events
   rolling_window: 10000        # maximum rows kept in the live telemetry file
+
+validation:
+  enabled: true
+  window: 500                     # rolling window size for accuracy and PRF metrics
+  target_electron_efficiency: 0.90  # ε_e target for pion rejection factor calculation

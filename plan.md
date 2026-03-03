@@ -3,7 +3,7 @@
 - [x] Add training script (train)
 - [x] Add local dashboard independent of main loop (dashboard)
 - [x] Script that launches both files simulatenously
-- [ ] Add test mode & accuracy metrics
-- [ ] Clean readme for what exists so far
-- [ ] Brainstorm, outline and implement online publishing
+- [x] Add test mode & accuracy metrics
 - [ ] Add more particle types if found feasible
+- [ ] Brainstorm, outline and implement online publishing
+- [ ] Clean readme with a simple overview than detailed explanations

@@ -42,6 +42,36 @@ def _write_live_telemetry(rows: list[dict], path: Path, rolling: int) -> None:
     log.debug("Live telemetry flushed → '%s' (%d rows).", path, min(len(rows), rolling))
 
 
+def _log_validation_metrics(
+    rows: list[dict],
+    window: int,
+    target_electron_efficiency: float,
+) -> None:
+    recent = [r for r in rows[-window:] if r.get("is_correct") is not None]
+    if not recent:
+        return
+
+    accuracy = sum(r["is_correct"] for r in recent) / len(recent)
+
+    true_electrons = [r for r in recent if r["teacher_label"] == 1]
+    true_pions     = [r for r in recent if r["teacher_label"] == 0]
+
+    electron_eff = (
+        sum(r["is_correct"] for r in true_electrons) / len(true_electrons)
+        if true_electrons else float("nan")
+    )
+    pion_misid_rate = (
+        sum(1 for r in true_pions if r["label"] == "electron") / len(true_pions)
+        if true_pions else float("nan")
+    )
+    prf = 1.0 / pion_misid_rate if pion_misid_rate > 0 else float("inf")
+
+    log.info(
+        "Validation (n=%d): acc=%.3f  ε_e=%.3f  PRF=%.1f  (target ε_e=%.2f)",
+        len(recent), accuracy, electron_eff, prf, target_electron_efficiency,
+    )
+
+
 def _setup_logging(level: str) -> None:
     logging.basicConfig(
         format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
@@ -69,6 +99,17 @@ def run(cfg: dict) -> None:
     live_path     = output_dir.parent / "live_telemetry.parquet"
     flush_interval = int(cfg["dashboard"]["flush_interval"])
     rolling_window = int(cfg["dashboard"]["rolling_window"])
+
+    val_cfg = cfg.get("validation", {})
+    validation_mode           = bool(val_cfg.get("enabled", False))
+    validation_window         = int(val_cfg.get("window", 500))
+    target_electron_efficiency = float(val_cfg.get("target_electron_efficiency", 0.90))
+
+    if validation_mode:
+        log.info(
+            "Validation mode ON (window=%d, target ε_e=%.2f).",
+            validation_window, target_electron_efficiency,
+        )
 
     daq = build_daq(cfg)
     clf = PIDClassifier.from_config(cfg)
@@ -103,6 +144,10 @@ def run(cfg: dict) -> None:
 
                 latency_us = (time.perf_counter_ns() - t0) / 1e3   # µs
 
+                is_correct: bool | None = None
+                if validation_mode and buf.teacher_label is not None:
+                    is_correct = pred.label_id == buf.teacher_label
+
                 log.info(
                     "evt=%05d  %-8s  conf=%.3f  %s  latency=%.1f µs",
                     event_id,
@@ -124,12 +169,15 @@ def run(cfg: dict) -> None:
                     "confidence":      pred.confidence,
                     "above_threshold": pred.above_threshold,
                     "latency_us":      latency_us,
+                    "is_correct":      is_correct,
                     **{k: float(v) for k, v in zip(FeatureVector.feature_names(), fv.to_array())},
                 })
 
                 # flush after latency measurement — outside the < 1 ms hot path
                 if event_id % flush_interval == 0:
                     _write_live_telemetry(rows, live_path, rolling_window)
+                    if validation_mode:
+                        _log_validation_metrics(rows, validation_window, target_electron_efficiency)
 
                 event_id += 1
 

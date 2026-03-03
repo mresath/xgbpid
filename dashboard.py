@@ -48,6 +48,8 @@ _TELEMETRY_PATH = Path(_cfg["logging"]["output_dir"]).parent / "live_telemetry.p
 _CONF_THRESHOLD = float(_cfg["model"]["confidence_threshold"])
 _DEFAULT_REFRESH = int(_cfg["dashboard"]["refresh_seconds"])
 _DEFAULT_WINDOW  = int(_cfg["dashboard"]["latency_window_events"])
+_LABEL_MAP       = {int(k): v for k, v in _cfg["model"]["labels"].items()}
+_VALIDATION_WINDOW = int(_cfg.get("validation", {}).get("window", 500))
 
 
 @st.cache_data(ttl=2, show_spinner=False)
@@ -185,6 +187,101 @@ def _latency_over_time(df: pl.DataFrame, window: int) -> go.Figure:
     return fig
 
 
+def _confusion_matrix(val_df: pl.DataFrame) -> go.Figure:
+    """Heatmap of true (teacher) vs predicted (student) particle labels."""
+    cm_df = (
+        val_df
+        .with_columns(
+            pl.col("teacher_label")
+            .cast(pl.Int32)
+            .map_elements(lambda x: _LABEL_MAP.get(x, str(x)), return_dtype=pl.Utf8)
+            .alias("true_label")
+        )
+        .group_by(["true_label", "label"])
+        .agg(pl.len().alias("count"))
+    )
+    label_names = sorted(_LABEL_MAP.values())
+    idx = {name: i for i, name in enumerate(label_names)}
+    matrix = [[0] * len(label_names) for _ in label_names]
+    for row in cm_df.to_dicts():
+        i = idx.get(row["true_label"], -1)
+        j = idx.get(row["label"], -1)
+        if i >= 0 and j >= 0:
+            matrix[i][j] = row["count"]
+    fig = go.Figure(go.Heatmap(
+        z=matrix,
+        x=[f"Pred: {n}" for n in label_names],
+        y=[f"True: {n}" for n in label_names],
+        colorscale="Blues",
+        text=[[str(v) for v in row] for row in matrix],
+        texttemplate="%{text}",
+        showscale=False,
+    ))
+    fig.update_layout(title="Live Confusion Matrix", margin=dict(t=40, b=10))
+    return fig
+
+
+def _rolling_accuracy(val_df: pl.DataFrame, window: int) -> go.Figure:
+    """Line chart of rolling classification accuracy against teacher labels."""
+    acc_df = (
+        val_df
+        .filter(pl.col("is_correct").is_not_null())
+        .with_columns(pl.col("is_correct").cast(pl.Float32))
+        .with_columns(
+            pl.col("is_correct")
+            .rolling_mean(window_size=window, min_periods=1)
+            .alias("rolling_accuracy")
+        )
+    )
+    fig = px.line(
+        acc_df.to_pandas(),
+        x="event_id",
+        y="rolling_accuracy",
+        color_discrete_sequence=["#4C9BE8"],
+        labels={"event_id": "Event ID", "rolling_accuracy": "Accuracy"},
+        title=f"Rolling Accuracy — window {window}",
+    )
+    fig.update_yaxes(range=[0, 1])
+    fig.update_layout(margin=dict(t=40, b=10))
+    return fig
+
+
+def _teacher_student_comparison(val_df: pl.DataFrame) -> go.Figure:
+    """Grouped bar chart overlaying teacher vs student label distributions."""
+    teacher_counts = (
+        val_df
+        .with_columns(
+            pl.col("teacher_label")
+            .cast(pl.Int32)
+            .map_elements(lambda x: _LABEL_MAP.get(x, str(x)), return_dtype=pl.Utf8)
+            .alias("label_name")
+        )
+        .group_by("label_name")
+        .agg(pl.len().alias("count"))
+        .with_columns(pl.lit("Teacher").alias("source"))
+        .rename({"label_name": "label"})
+    )
+    student_counts = (
+        val_df
+        .group_by("label")
+        .agg(pl.len().alias("count"))
+        .with_columns(pl.lit("Student").alias("source"))
+    )
+    combined = pl.concat([teacher_counts, student_counts])
+    fig = px.bar(
+        combined.to_pandas(),
+        x="label",
+        y="count",
+        color="source",
+        barmode="group",
+        color_discrete_map={"Teacher": "#888888", "Student": "#4C9BE8"},
+        labels={"label": "Particle", "count": "Events", "source": "Source"},
+        title="Teacher vs. Student Label Distribution",
+    )
+    fig.update_layout(margin=dict(t=40, b=10))
+    return fig
+
+
 def _latest_events_table(df: pl.DataFrame, n: int = 20) -> pl.DataFrame:
     return (
         df.tail(n)
@@ -231,6 +328,10 @@ def main() -> None:
         )
         auto_refresh = st.checkbox("Auto-refresh", value=True)
 
+        st.divider()
+        st.subheader("Validation Mode")
+        validation_mode = st.toggle("Enable Validation Mode", value=False)
+
     st.title("XGBPID — Live Monitor")
     st.caption(f"Telemetry file: `{telemetry_path}`")
 
@@ -252,6 +353,31 @@ def main() -> None:
 
     _metric_row(df)
     st.divider()
+
+    if validation_mode:
+        val_df = df.filter(pl.col("teacher_label").is_not_null()) if "teacher_label" in df.columns else None
+        has_corrections = (
+            val_df is not None
+            and len(val_df) > 0
+            and "is_correct" in df.columns
+            and df["is_correct"].drop_nulls().__len__() > 0
+        )
+        if has_corrections:
+            st.subheader("Validation")
+            col_v1, col_v2 = st.columns(2)
+            with col_v1:
+                st.plotly_chart(_confusion_matrix(val_df), use_container_width=True)
+            with col_v2:
+                st.plotly_chart(_teacher_student_comparison(val_df), use_container_width=True)
+            st.plotly_chart(_rolling_accuracy(val_df, _VALIDATION_WINDOW), use_container_width=True)
+            st.divider()
+        else:
+            st.info(
+                "Validation data not yet available. "
+                "Ensure `validation.enabled: true` in the config and teacher labels are present.",
+                icon="⚠️",
+            )
+            st.divider()
 
     col_a, col_b = st.columns(2)
     with col_a:

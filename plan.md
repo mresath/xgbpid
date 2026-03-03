@@ -1,6 +1,7 @@
 - [x] Add core setup and data processing (daq, inference, processor)
 - [x] Add loop (main)
 - [x] Add training script (train)
-- [ ] Add local dashboard independent of main loop (dashboard)
-- [ ] Brainstorm, implement and add online publishing
+- [x] Add local dashboard independent of main loop (dashboard)
+- [ ] Script that launches both files simulatenously
+- [ ] Brainstorm, outline and implement online publishing
 - [ ] Add more particle types if found feasible

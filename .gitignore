@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv
+env/
+venv/
+.env
+
+# Poetry
+poetry.lock
+
+# Science & ML
+# Ignore large raw data files, but keep the folder
+data/*
+!data/.gitkeep
+
+# Ignore trained model binaries (keep them on local/cloud storage, not Git)
+models/*.bin
+models/*.json
+models/*.onnx
+!models/.gitkeep
+
+# IDEs
+.vscode/
+.idea/
+
+# OS specific
+.DS_Store
+Thumbs.db

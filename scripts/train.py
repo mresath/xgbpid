@@ -114,7 +114,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train the XGBPID classifier")
     parser.add_argument("--config",   default="configs/experiment_v1.yaml")
     parser.add_argument("--n-events", type=int, default=10_000, dest="n_events")
-    parser.add_argument("--output",   default="models/xgb_pid.json")
+    parser.add_argument("--output",   default="models/xgbpid.json")
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))

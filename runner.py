@@ -1,5 +1,5 @@
 """
-Runner — starts main.main() and the Streamlit dashboard together.
+Runner — Starts the main loop and the dashboard together.
 
 Usage:
     python runner.py [--config configs/experiment_v1.yaml] [--port 8501]
@@ -22,7 +22,7 @@ def _run_main(config: str) -> None:
 
 
 def run(config: str = "configs/experiment_v1.yaml", port: int = 8501) -> None:
-    """Launch the loop and the Streamlit dashboard in parallel."""
+    """Launch the loop and the dashboard in parallel."""
     main_proc = multiprocessing.Process(
         target=_run_main,
         args=(config,),

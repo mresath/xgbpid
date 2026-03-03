@@ -29,7 +29,7 @@ pulse_shapes:
     decay_ns: 45.0
 
 model:
-  path: "models/xgb_pid.json"
+  path: "models/xgbpid.json"
   labels:
     0: "pion"
     1: "electron"

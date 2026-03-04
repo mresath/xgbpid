@@ -31,7 +31,7 @@ class AcquisitionBuffer:
     samples: np.ndarray          # shape (buffer_size,), float32 in volts
     timestamp_ns: float          # wall-clock time of trigger receipt
     channel: str                 # e.g. "CH1"
-    teacher_label: int | None = None  # 1 = electron (Cherenkov fired), 0 = pion, None = unknown
+    teacher_label: int | None = None  # 0=pion, 1=electron, 2=kaon; None if coincidence is ambiguous
     simulated: bool = False
 
 
@@ -78,6 +78,10 @@ class RedPitayaDAQ(BaseDAQ):
         buffer_size: int,
         trigger_level: float,
         trigger_delay: int,
+        xcet1_source: int = 2,
+        xcet2_source: int = 3,
+        calorimeter_source: int = 4,
+        calorimeter_threshold: float = 0.30,
     ) -> None:
         self._host = host
         self._port = port
@@ -86,6 +90,10 @@ class RedPitayaDAQ(BaseDAQ):
         self._buffer_size = buffer_size
         self._trigger_level = trigger_level
         self._trigger_delay = trigger_delay
+        self._xcet1_source = xcet1_source
+        self._xcet2_source = xcet2_source
+        self._calorimeter_source = calorimeter_source
+        self._calorimeter_threshold = calorimeter_threshold
         self._rp: scpi | None = None
 
     def connect(self) -> None:
@@ -148,11 +156,7 @@ class RedPitayaDAQ(BaseDAQ):
             raw_str = rp.rx_txt().strip().strip("{}")
             samples = np.fromstring(raw_str, sep=",", dtype=np.float32)
 
-            # CH2 — teacher label (Cherenkov XCET: fires on electrons)
-            rp.tx_txt("ACQ:SOUR2:DATA?")
-            ch2_str = rp.rx_txt().strip().strip("{}")
-            ch2 = np.fromstring(ch2_str, sep=",", dtype=np.float32)
-            teacher_label = 1 if float(ch2.max()) > self._trigger_level else 0
+            teacher_label = self._decode_teacher_label(rp)
 
             return AcquisitionBuffer(
                 samples=samples,
@@ -173,8 +177,41 @@ class RedPitayaDAQ(BaseDAQ):
                 ) from reset_exc
             raise RuntimeError("Trigger missed due to reconnection.") from exc
 
+    def _decode_teacher_label(self, rp: scpi) -> int | None:
+        """
+        Determine the particle species from three coincidence channels.
 
-ParticleLabel = Literal["electron", "pion"]
+        The labelling scheme uses two threshold Cherenkov detectors (XCET-1
+        and XCET-2) and a lead-glass calorimeter:
+
+          - Pion (0):    XCET-1 fires, calorimeter is silent.
+
+          - Electron (1): XCET-1 fires AND calorimeter pulse exceeds threshold.
+
+          - Kaon (2):    XCET-2 fires AND XCET-1 is vetoed (silent). Any event where both
+                          detectors fire is ambiguous and is discarded.
+
+        Returns None if the coincidence pattern does not match any known species.
+        """
+        def _read_max(source: int) -> float:
+            rp.tx_txt(f"ACQ:SOUR{source}:DATA?")
+            raw = rp.rx_txt().strip().strip("{}")
+            return float(np.fromstring(raw, sep=",", dtype=np.float32).max())
+
+        xcet1_fired = _read_max(self._xcet1_source) > self._trigger_level
+        xcet2_fired = _read_max(self._xcet2_source) > self._trigger_level
+        calo_fired  = _read_max(self._calorimeter_source) > self._calorimeter_threshold
+
+        if xcet2_fired and not xcet1_fired:
+            return 2  # Kaon: veto on XCET-1 isolates kaons from pions/electrons
+        if xcet1_fired and calo_fired:
+            return 1  # Electron: XCET-1 coincidence with EM calorimeter
+        if xcet1_fired and not calo_fired:
+            return 0  # Pion: XCET-1 fired but no calorimeter response
+        return None   # ambiguous or no coincidence
+
+
+ParticleLabel = Literal["electron", "pion", "kaon"]
 
 class MockDAQ(BaseDAQ):
     """
@@ -203,6 +240,7 @@ class MockDAQ(BaseDAQ):
         pulse_config: dict,
         label: ParticleLabel | None = None,
         electron_fraction: float = 0.08,
+        kaon_fraction: float = 0.015,
         onset_jitter_samples: int = 5,
     ) -> None:
         self._buffer_size = buffer_size
@@ -210,15 +248,18 @@ class MockDAQ(BaseDAQ):
         self._pulse_config = pulse_config
         self._label = label                          # None → sample from beam composition
         self._electron_fraction = electron_fraction
+        self._kaon_fraction = kaon_fraction
         self._onset_jitter = onset_jitter_samples
         self._rng = np.random.default_rng()
 
     def connect(self) -> None:
         if self._label is None:
+            pion_fraction = 1.0 - self._electron_fraction - self._kaon_fraction
             log.info(
-                "MockDAQ ready (beam mixture: %.0f%% e⁻ / %.0f%% π, N=%d samples).",
+                "MockDAQ ready (beam mixture: %.0f%% e⁻ / %.0f%% π⁻ / %.1f%% K⁻, N=%d samples).",
                 self._electron_fraction * 100,
-                (1 - self._electron_fraction) * 100,
+                pion_fraction * 100,
+                self._kaon_fraction * 100,
                 self._buffer_size,
             )
         else:
@@ -228,7 +269,7 @@ class MockDAQ(BaseDAQ):
         log.info("MockDAQ closed.")
 
     def set_label(self, label: ParticleLabel) -> None:
-        """Switch the particle type that will be simulated on the next call."""
+        """Pin the simulated species for subsequent calls. Pass None to restore beam-mixture sampling."""
         self._label = label
 
     def wait_for_trigger(self) -> AcquisitionBuffer:
@@ -245,9 +286,13 @@ class MockDAQ(BaseDAQ):
         """
         # species selection
         if self._label is None:
-            species: ParticleLabel = (
-                "electron" if self._rng.random() < self._electron_fraction else "pion"
-            )
+            roll = self._rng.random()
+            if roll < self._electron_fraction:
+                species: ParticleLabel = "electron"
+            elif roll < self._electron_fraction + self._kaon_fraction:
+                species = "kaon"
+            else:
+                species = "pion"
         else:
             species = self._label
 
@@ -255,9 +300,10 @@ class MockDAQ(BaseDAQ):
         A_nominal = float(cfg["amplitude_v"])
         spread    = float(cfg.get("amplitude_spread_frac", 0.10))
 
-        # amplitude variation by species
-        if species == "pion":
-            # LogNormal with the given fractional spread gives a Landau-like right tail
+        # amplitude variation by species:
+        #   pion/kaon → LogNormal (Landau-like right tail from hadronic interactions)
+        #   electron  → Gaussian  (EM shower — tighter energy deposit spread)
+        if species in ("pion", "kaon"):
             sigma_ln = float(np.sqrt(np.log(1.0 + spread ** 2)))
             mu_ln    = float(np.log(A_nominal) - 0.5 * sigma_ln ** 2)
             A = float(np.clip(self._rng.lognormal(mu_ln, sigma_ln), 0.05, None))
@@ -282,7 +328,8 @@ class MockDAQ(BaseDAQ):
         sigma = A * self._noise_sigma_frac
         noise = self._rng.normal(0.0, sigma, size=self._buffer_size).astype(np.float32)
 
-        teacher_label = 1 if species == "electron" else 0
+        label_map: dict[str, int] = {"pion": 0, "electron": 1, "kaon": 2}
+        teacher_label = label_map[species]
 
         return AcquisitionBuffer(
             samples=(pulse + noise).astype(np.float32),
@@ -309,6 +356,7 @@ def build_daq(cfg: dict) -> BaseDAQ:
             noise_sigma_frac=sim["noise_sigma_frac"],
             pulse_config=cfg["pulse_shapes"],
             electron_fraction=sim.get("electron_fraction", 0.08),
+            kaon_fraction=sim.get("kaon_fraction", 0.015),
             onset_jitter_samples=sim.get("onset_jitter_samples", 5),
         )
 
@@ -322,4 +370,8 @@ def build_daq(cfg: dict) -> BaseDAQ:
         buffer_size=hw["buffer_size"],
         trigger_level=hw["trigger_level"],
         trigger_delay=hw["trigger_delay"],
+        xcet1_source=hw.get("xcet1_source", 2),
+        xcet2_source=hw.get("xcet2_source", 3),
+        calorimeter_source=hw.get("calorimeter_source", 4),
+        calorimeter_threshold=hw.get("calorimeter_threshold", 0.30),
     )

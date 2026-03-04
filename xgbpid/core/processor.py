@@ -110,6 +110,7 @@ def extract(
     buf: AcquisitionBuffer,
     tail_start_frac: float = 0.25,
     pileup_threshold_v: float = 0.050,
+    pileup_min_width: int = 5,
     rise_low_frac: float = 0.10,
     rise_high_frac: float = 0.90,
     baseline_window: int = 50,
@@ -119,6 +120,12 @@ def extract(
 
     Returns None if the event is flagged as pile-up (more than one distinct
     pulse above pileup_threshold_v), so the caller can discard it cleanly.
+
+    pileup_min_width sets how many consecutive samples must stay above
+    pileup_threshold_v before a crossing counts as a real second pulse.
+    The default of 5 samples (40 ns at 125 MHz) prevents long-tail species
+    such as kaons from being falsely rejected when noise briefly dips the
+    waveform below the threshold during the decay.
 
     All threshold parameters are read from the experiment config so the system
     can be recalibrated for the CERN noise floor without a code redeploy.
@@ -131,8 +138,8 @@ def extract(
     baseline_rms = float(np.std(wf[:baseline_window]))
     wf -= baseline   # zero-centre
 
-    # pile-up rejection: more than one real pulse (3-sample minimum width)
-    if _count_peaks_above(wf, pileup_threshold_v) > 1:
+    # pile-up rejection: more than one real pulse (min_width-sample minimum width)
+    if _count_peaks_above(wf, pileup_threshold_v, min_width=pileup_min_width) > 1:
         log.debug("Pile-up detected; discarding event.")
         return None
 

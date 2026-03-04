@@ -4,6 +4,7 @@
 - [x] Add local dashboard independent of main loop (dashboard)
 - [x] Script that launches both files simulatenously
 - [x] Add test mode & accuracy metrics
-- [ ] Add more particle types if found feasible
+- [x] Add more particle types if found feasible
+- [ ] Implement real-time training
 - [ ] Brainstorm, outline and implement online publishing
 - [ ] Clean readme with a simple overview than detailed explanations

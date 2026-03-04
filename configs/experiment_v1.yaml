@@ -8,12 +8,17 @@ hardware:
   buffer_size: 1024         # samples per acquisition
   trigger_level: 0.1        # V — threshold for TLU trigger detection
   trigger_delay: 0          # samples to store before trigger point
+  xcet1_source: 2           # SCPI source index for XCET-1 (pion/electron Cherenkov)
+  xcet2_source: 3           # SCPI source index for XCET-2 (kaon Cherenkov threshold)
+  calorimeter_source: 4     # SCPI source index for lead-glass calorimeter
+  calorimeter_threshold: 0.30  # V — minimum calorimeter pulse for EM identification
 
 simulation:
   use_simulation: true      # set false when Red Pitaya is physically connected
   sample_rate_mhz: 125.0
   noise_sigma_frac: 0.02    # 2% of peak amplitude
-  electron_fraction: 0.08   # ~8% electrons at typical T9 momenta (rest are pions)
+  electron_fraction: 0.08   # ~8% electrons at typical T9 momenta
+  kaon_fraction: 0.015      # ~1.5% kaons at typical T9 momenta
   onset_jitter_samples: 5   # uniform ±N samples of timing jitter on the pulse onset
 
 pulse_shapes:
@@ -27,16 +32,23 @@ pulse_shapes:
     amplitude_spread_frac: 0.30   # LogNormal spread — Landau distribution for MIPs
     rise_ns: 3.0
     decay_ns: 45.0
+  kaon:
+    amplitude_v: 0.65
+    amplitude_spread_frac: 0.25   # LogNormal — heavier hadron, broader hadronic shower
+    rise_ns: 5.0                  # slower rise than pion due to hadronic shower development
+    decay_ns: 80.0                # extended tail from heavier hadronic cascade
 
 model:
   path: "models/xgbpid.json"
   labels:
     0: "pion"
     1: "electron"
+    2: "kaon"
   confidence_threshold: 0.70
 
 processing:
   pileup_threshold_v: 0.050   # minimum voltage for a real pulse (V); tune to noise floor at CERN
+  pileup_min_width: 5          # minimum consecutive samples above threshold to count as a second pulse
   rise_low_frac: 0.10          # lower bound for rise-time measurement (fraction of peak)
   rise_high_frac: 0.90         # upper bound for rise-time measurement
   baseline_window: 50          # number of pre-trigger samples used to estimate baseline

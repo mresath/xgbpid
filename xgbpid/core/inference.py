@@ -1,9 +1,15 @@
 """
 XGBoost-based particle identification.
 
-Loads a pre-trained model from disk and maps a FeatureVector to a
-particle label (electron / pion) with an associated confidence score.
-The model file is expected to be the JSON format produced by xgb.Booster.save_model().
+Loads a pre-trained model from disk and maps a FeatureVector to a particle
+label (pion / electron / kaon) with an associated confidence score.
+
+predict() takes the argmax of the probability vector as the class label and the
+corresponding probability as confidence.  The label-to-name mapping is loaded
+dynamically from the YAML config, so adding new particle classes requires no
+code changes here.
+
+The model file is expected to be JSON format produced by xgb.Booster.save_model().
 """
 
 import logging

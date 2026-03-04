@@ -42,6 +42,20 @@ def _write_live_telemetry(rows: list[dict], path: Path, rolling: int) -> None:
     log.debug("Live telemetry flushed → '%s' (%d rows).", path, min(len(rows), rolling))
 
 
+def _write_kaon_telemetry(rows: list[dict], path: Path) -> None:
+    """Atomically extend the kaon telemetry file with all buffered kaon rows.
+
+    Kaons constitute only ~1-2% of the beam, so their events are written
+    eagerly on every occurrence to prevent data loss between general flushes.
+    """
+    if not rows:
+        return
+    tmp = path.with_suffix(".parquet.tmp")
+    pl.DataFrame(rows).write_parquet(tmp)
+    os.replace(tmp, path)
+    log.debug("Kaon telemetry flushed → '%s' (%d kaon events).", path, len(rows))
+
+
 def _log_validation_metrics(
     rows: list[dict],
     window: int,
@@ -55,6 +69,7 @@ def _log_validation_metrics(
 
     true_electrons = [r for r in recent if r["teacher_label"] == 1]
     true_pions     = [r for r in recent if r["teacher_label"] == 0]
+    true_kaons     = [r for r in recent if r["teacher_label"] == 2]
 
     electron_eff = (
         sum(r["is_correct"] for r in true_electrons) / len(true_electrons)
@@ -64,11 +79,15 @@ def _log_validation_metrics(
         sum(1 for r in true_pions if r["label"] == "electron") / len(true_pions)
         if true_pions else float("nan")
     )
+    kaon_eff = (
+        sum(r["is_correct"] for r in true_kaons) / len(true_kaons)
+        if true_kaons else float("nan")
+    )
     prf = 1.0 / pion_misid_rate if pion_misid_rate > 0 else float("inf")
 
     log.info(
-        "Validation (n=%d): acc=%.3f  ε_e=%.3f  PRF=%.1f  (target ε_e=%.2f)",
-        len(recent), accuracy, electron_eff, prf, target_electron_efficiency,
+        "Validation (n=%d): acc=%.3f  ε_e=%.3f  ε_K=%.3f  PRF=%.1f  (target ε_e=%.2f)",
+        len(recent), accuracy, electron_eff, kaon_eff, prf, target_electron_efficiency,
     )
 
 
@@ -96,7 +115,8 @@ def run(cfg: dict) -> None:
     output_dir = Path(cfg["logging"]["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    live_path     = output_dir.parent / "live_telemetry.parquet"
+    live_path      = output_dir.parent / "live_telemetry.parquet"
+    kaon_live_path = output_dir.parent / "kaon_telemetry.parquet"
     flush_interval = int(cfg["dashboard"]["flush_interval"])
     rolling_window = int(cfg["dashboard"]["rolling_window"])
 
@@ -117,6 +137,7 @@ def run(cfg: dict) -> None:
 
     # accumulate rows in plain lists; convert to Polars once at the end
     rows: list[dict] = []
+    kaon_rows: list[dict] = []  # dedicated buffer for kaon events — flushed on every occurrence
 
     log.info("Starting acquisition loop. Press Ctrl+C to stop.")
     event_id  = 0
@@ -131,6 +152,7 @@ def run(cfg: dict) -> None:
                 fv = extract(
                     buf,
                     pileup_threshold_v=proc["pileup_threshold_v"],
+                    pileup_min_width=proc.get("pileup_min_width", 5),
                     rise_low_frac=proc["rise_low_frac"],
                     rise_high_frac=proc["rise_high_frac"],
                     baseline_window=proc["baseline_window"],
@@ -173,6 +195,11 @@ def run(cfg: dict) -> None:
                     **{k: float(v) for k, v in zip(FeatureVector.feature_names(), fv.to_array())},
                 })
 
+                # kaons are ~1–2% of the beam; flush immediately so low-rate events are never lost
+                if pred.label_id == 2 or buf.teacher_label == 2:
+                    kaon_rows.append(rows[-1])
+                    _write_kaon_telemetry(kaon_rows, kaon_live_path)
+
                 # flush after latency measurement — outside the < 1 ms hot path
                 if event_id % flush_interval == 0:
                     _write_live_telemetry(rows, live_path, rolling_window)
@@ -187,6 +214,7 @@ def run(cfg: dict) -> None:
             log.info("Interrupted after %d events (%d pile-up skipped).", event_id, pileup_ct)
         finally:
             _write_live_telemetry(rows, live_path, rolling_window)  # flush remainder
+            _write_kaon_telemetry(kaon_rows, kaon_live_path)
 
     if rows:
         run_ts  = time.strftime("%Y%m%d_%H%M%S")

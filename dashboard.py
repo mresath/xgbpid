@@ -24,7 +24,7 @@ import streamlit as st
 import yaml
 
 _LATENCY_BUDGET_US = 1_000.0   # µs — not user-configurable
-_PARTICLE_COLORS   = {"electron": "#4C9BE8", "pion": "#E8704C"}
+_PARTICLE_COLORS   = {"electron": "#4C9BE8", "pion": "#E8704C", "kaon": "#A855F7"}
 
 
 def _load_config(path: str) -> dict:
@@ -44,7 +44,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 _cfg           = _load_config(_parse_args().config)
-_TELEMETRY_PATH = Path(_cfg["logging"]["output_dir"]).parent / "live_telemetry.parquet"
+_TELEMETRY_PATH      = Path(_cfg["logging"]["output_dir"]).parent / "live_telemetry.parquet"
+_KAON_TELEMETRY_PATH = Path(_cfg["logging"]["output_dir"]).parent / "kaon_telemetry.parquet"
 _CONF_THRESHOLD = float(_cfg["model"]["confidence_threshold"])
 _DEFAULT_REFRESH = int(_cfg["dashboard"]["refresh_seconds"])
 _DEFAULT_WINDOW  = int(_cfg["dashboard"]["latency_window_events"])
@@ -68,18 +69,22 @@ def _metric_row(df: pl.DataFrame) -> None:
     total      = len(df)
     n_electron = (df["label"] == "electron").sum()
     n_pion     = (df["label"] == "pion").sum()
+    n_kaon     = (df["label"] == "kaon").sum()
     e_pct      = 100.0 * n_electron / total if total else 0.0
+    pi_pct     = 100.0 * n_pion / total if total else 0.0
+    k_pct      = 100.0 * n_kaon / total if total else 0.0
     mean_lat   = df["latency_us"].mean() or 0.0
     p99_lat    = df["latency_us"].quantile(0.99) or 0.0
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Total events",  f"{total:,}")
     c2.metric("Electrons",     f"{n_electron:,}",  f"{e_pct:.1f} %")
-    c3.metric("Pions",         f"{n_pion:,}",      f"{100-e_pct:.1f} %")
-    c4.metric("Mean latency",  f"{mean_lat:.1f} µs")
+    c3.metric("Pions",         f"{n_pion:,}",      f"{pi_pct:.1f} %")
+    c4.metric("Kaons",         f"{n_kaon:,}",      f"{k_pct:.2f} %")
+    c5.metric("Mean latency",  f"{mean_lat:.1f} µs")
 
     p99_delta = f"budget {'OK' if p99_lat <= _LATENCY_BUDGET_US else 'EXCEEDED'}"
-    c5.metric(
+    c6.metric(
         "p99 latency",
         f"{p99_lat:.1f} µs",
         p99_delta,
@@ -294,6 +299,71 @@ def _latest_events_table(df: pl.DataFrame, n: int = 20) -> pl.DataFrame:
     )
 
 
+def _kaon_panel(kaon_df: pl.DataFrame) -> None:
+    """Dedicated section for the kaon stream.
+
+    Kaons are flushed on every occurrence into a separate file because they
+    represent only ~1-2% of the beam.  This panel reads that dedicated stream
+    so kaon events are never diluted by the rolling main-telemetry window.
+    """
+    st.subheader("Kaon Stream")
+    total_k = len(kaon_df)
+    mean_conf = kaon_df["confidence"].mean() or 0.0
+    above_thresh = (kaon_df["above_threshold"] == True).sum()  # noqa: E712
+    above_pct = 100.0 * above_thresh / total_k if total_k else 0.0
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Kaon events captured", f"{total_k:,}")
+    k2.metric("Mean confidence",      f"{mean_conf:.3f}")
+    k3.metric("Above threshold",      f"{above_thresh:,}", f"{above_pct:.1f} %")
+
+    col_k1, col_k2 = st.columns(2)
+    with col_k1:
+        fig_conf = px.histogram(
+            kaon_df.to_pandas(),
+            x="confidence",
+            nbins=30,
+            color_discrete_sequence=[_PARTICLE_COLORS["kaon"]],
+            labels={"confidence": "Classifier confidence", "count": "Events"},
+            title="Kaon Confidence Distribution",
+        )
+        fig_conf.add_vline(
+            x=_CONF_THRESHOLD,
+            line_dash="dash",
+            line_color="grey",
+            annotation_text=f"threshold {_CONF_THRESHOLD:.2f}",
+            annotation_position="top right",
+        )
+        fig_conf.update_layout(margin=dict(t=40, b=10))
+        st.plotly_chart(fig_conf, use_container_width=True)
+
+    with col_k2:
+        fig_psd = px.scatter(
+            kaon_df.to_pandas(),
+            x="tail_to_total",
+            y="rise_time_ns",
+            color_discrete_sequence=[_PARTICLE_COLORS["kaon"]],
+            opacity=0.6,
+            labels={
+                "tail_to_total": "Tail-to-total ratio (PSD)",
+                "rise_time_ns": "Rise time (ns)",
+            },
+            title="Kaon PSD Feature Space",
+        )
+        fig_psd.update_layout(margin=dict(t=40, b=10))
+        st.plotly_chart(fig_psd, use_container_width=True)
+
+    with st.expander("Latest kaon events (most recent first)", expanded=False):
+        st.dataframe(
+            kaon_df.tail(20)
+            .select(["event_id", "label", "confidence", "above_threshold",
+                     "tail_to_total", "rise_time_ns", "peak_amplitude", "teacher_label"])
+            .reverse(),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="XGBPID | Live",
@@ -309,6 +379,11 @@ def main() -> None:
             "Parquet file",
             value=str(_TELEMETRY_PATH),
             help="Path to live_telemetry.parquet written by main.py",
+        )
+        kaon_telemetry_path = st.text_input(
+            "Kaon stream file",
+            value=str(_KAON_TELEMETRY_PATH),
+            help="Path to kaon_telemetry.parquet (flushed on every kaon event)",
         )
 
         st.divider()
@@ -336,6 +411,7 @@ def main() -> None:
     st.caption(f"Telemetry file: `{telemetry_path}`")
 
     df = _load(telemetry_path)
+    kaon_df = _load(kaon_telemetry_path)
 
     if df is None or len(df) == 0:
         st.info(
@@ -392,6 +468,16 @@ def main() -> None:
         st.plotly_chart(_latency_histogram(df), use_container_width=True)
     with col_d:
         st.plotly_chart(_latency_over_time(df, latency_window), use_container_width=True)
+
+    st.divider()
+    if kaon_df is not None and len(kaon_df) > 0:
+        _kaon_panel(kaon_df)
+    else:
+        st.info(
+            "No kaon events captured yet. "
+            "Kaons appear at ~1-2% beam fraction; the stream will populate automatically.",
+            icon="🟣",
+        )
 
     with st.expander("Latest events (most recent first)", expanded=True):
         st.dataframe(

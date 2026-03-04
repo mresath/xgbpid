@@ -71,3 +71,7 @@ validation:
 retraining:
   interval_seconds: 60    # retrain every N seconds; lower this to make the model update faster
   n_events: 30000         # training set size per cycle (simulation mode)
+
+relay:
+  enabled: true
+  upload_interval_seconds: 60

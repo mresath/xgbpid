@@ -1,0 +1,6 @@
+streamlit
+polars
+pandas
+numpy
+plotly
+supabase

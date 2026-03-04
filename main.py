@@ -24,6 +24,7 @@ import yaml
 from xgbpid.core.daq import build_daq, CriticalDAQError
 from xgbpid.core.inference import PIDClassifier
 from xgbpid.core.processor import FeatureVector, extract
+from xgbpid.core.relay import TelemetryRelay
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +132,8 @@ def run(cfg: dict) -> None:
             validation_window, target_electron_efficiency,
         )
 
+    relay = TelemetryRelay(cfg, live_path)
+
     daq = build_daq(cfg)
     clf = PIDClassifier.from_config(cfg)
     proc = cfg["processing"]
@@ -200,9 +203,10 @@ def run(cfg: dict) -> None:
                     kaon_rows.append(rows[-1])
                     _write_kaon_telemetry(kaon_rows, kaon_live_path)
 
-                # flush after latency measurement — outside the < 1 ms hot path
+                # flush and relay update — outside the < 1 ms hot path
                 if event_id % flush_interval == 0:
                     _write_live_telemetry(rows, live_path, rolling_window)
+                    relay.tick()
                     if validation_mode:
                         _log_validation_metrics(rows, validation_window, target_electron_efficiency)
 

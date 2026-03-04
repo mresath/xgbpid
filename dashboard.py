@@ -57,6 +57,9 @@ _DEFAULT_REFRESH = int(_cfg["dashboard"]["refresh_seconds"])
 _DEFAULT_WINDOW  = int(_cfg["dashboard"]["latency_window_events"])
 _LABEL_MAP       = {int(k): v for k, v in _cfg["model"]["labels"].items()}
 _VALIDATION_WINDOW = int(_cfg.get("validation", {}).get("window", 500))
+_RELAY_STATUS_FILE = _DATA_DIR / "relay_status.json"
+_RELAY_INTERVAL_S  = int(_cfg.get("relay", {}).get("upload_interval_seconds", 30))
+_RELAY_ENABLED     = bool(_cfg.get("relay", {}).get("enabled", False))
 
 
 @st.cache_data(ttl=2, show_spinner=False)
@@ -77,6 +80,16 @@ def _load_retrain_status() -> dict | None:
         return None
     try:
         return json.loads(_STATUS_FILE.read_text())
+    except Exception:
+        return None
+
+
+def _load_relay_status() -> dict | None:
+    """Read the relay status JSON, returning None if not yet written."""
+    if not _RELAY_STATUS_FILE.exists():
+        return None
+    try:
+        return json.loads(_RELAY_STATUS_FILE.read_text())
     except Exception:
         return None
 
@@ -324,6 +337,44 @@ def _latest_events_table(df: pl.DataFrame, n: int = 20) -> pl.DataFrame:
     )
 
 
+def _relay_status_panel() -> None:
+    """Show current cloud publishing state: enabled flag, upload count, last upload age, and any errors."""
+    status = _load_relay_status()
+
+    if not _RELAY_ENABLED:
+        st.warning("Relay is **disabled** in config — telemetry is not being published.", icon="☁️")
+        return
+
+    if status is None:
+        st.info("Relay is enabled but has not run yet. Start `python main.py` to begin publishing.", icon="☁️")
+        return
+
+    if not status.get("configured"):
+        st.warning("Relay is enabled but Supabase credentials are missing — check your `.env` file.", icon="⚠️")
+    elif status.get("last_error"):
+        st.error(f"Last upload failed: `{status['last_error']}`", icon="❌")
+    else:
+        st.success("Publishing to Supabase is **active**.", icon="☁️")
+
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Uploads this run", str(status.get("upload_count", 0)))
+
+    last_ts = status.get("last_upload", 0)
+    if last_ts:
+        age_s = time.time() - last_ts
+        age_str = f"{int(age_s)}s ago" if age_s < 120 else f"{int(age_s/60)}m ago"
+    else:
+        age_str = "never"
+    p2.metric("Last upload", age_str)
+
+    interval_s = status.get("interval_s", _RELAY_INTERVAL_S)
+    if last_ts and status.get("configured") and not status.get("last_error"):
+        next_s = max(0, int(interval_s - (time.time() - last_ts)))
+        p3.metric("Next upload in", f"{next_s}s")
+    else:
+        p3.metric("Next upload in", f"{int(interval_s)}s")
+
+
 def _retrain_status_panel(paused: bool) -> None:
     """Show current model file age, retraining cycle info, and feature importance."""
     status = _load_retrain_status()
@@ -518,6 +569,10 @@ def main() -> None:
 
     with st.expander("Model & Retraining", expanded=not retraining_paused):
         _retrain_status_panel(retraining_paused)
+    st.divider()
+
+    with st.expander("Cloud Publishing", expanded=True):
+        _relay_status_panel()
     st.divider()
 
     if validation_mode:

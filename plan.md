@@ -6,5 +6,5 @@
 - [x] Add test mode & accuracy metrics
 - [x] Add more particle types if found feasible
 - [x] Implement real-time training (re-training)
-- [ ] Brainstorm, outline and implement online publishing
+- [x] Brainstorm, outline and implement online publishing
 - [ ] Clean readme with a simple overview than detailed explanations

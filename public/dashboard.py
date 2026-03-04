@@ -82,8 +82,8 @@ def _synthesize_waveform(row: dict) -> np.ndarray:
 def _live_pulse_viewer(df: pl.DataFrame) -> None:
     st.subheader("Live Pulse Viewer")
     st.caption(
-        "Reconstructed waveform of the most recently classified particle — "
-        "synthesised from the pulse-shape features the XGBoost model was trained on."
+        "This is what the detector actually saw, reconstructed from the shape features "
+        "the model used to make its call."
     )
     latest = df.tail(1).to_dicts()[0]
     wave = _synthesize_waveform(latest)
@@ -106,7 +106,7 @@ def _live_pulse_viewer(df: pl.DataFrame) -> None:
 
 def _species_counter(df: pl.DataFrame) -> None:
     st.subheader("Global Species Counter")
-    st.caption("Cumulative particle counts since the start of this run.")
+    st.caption(f"Counted across all {len(df):,} events recorded this run.")
 
     n_e = int((df["label"] == "electron").sum())
     n_pi = int((df["label"] == "pion").sum())
@@ -140,8 +140,8 @@ def _species_counter(df: pl.DataFrame) -> None:
 def _confidence_heatmap(df: pl.DataFrame) -> None:
     st.subheader("AI Confidence Heatmap")
     st.caption(
-        "How confident is the XGBoost classifier across the measured pulse amplitude range? "
-        "Dense bright regions mean the model recognises the particle type clearly."
+        "Each cell shows how many particles fell into that amplitude × confidence bin. "
+        "Bright clusters mean the model is very sure; sparse low-confidence regions are where it hesitates."
     )
     pdf = df.select(["confidence", "peak_amplitude", "label"]).to_pandas()
     fig = px.density_heatmap(
@@ -178,60 +178,54 @@ def _science_corner() -> None:
         st.title("XGBPID")
         st.caption("Live Global Dashboard")
         st.divider()
-        st.subheader("🔬 Science Corner")
+        st.subheader("🔬 Background")
 
-        with st.expander("What is the Teacher–Student model?", expanded=True):
+        with st.expander("How does the AI work?", expanded=True):
             st.markdown(
                 """
-The **Teacher** is a slow but highly accurate algorithm — typically a
-full likelihood fit using multiple Cherenkov counters — that labels
-each beam particle with high purity.
+We train two models. The **Teacher** is slow but very accurate — it uses
+multiple Cherenkov detectors to figure out what each particle is.
 
-The **Student** is our XGBoost classifier.  It learns to reproduce
-the Teacher's labels from only the fast, single-channel pulse-shape
-features (rise time, FWHM, tail-to-total ratio, AUC).  Once trained,
-the student runs in **< 1 ms per event** — fast enough for real-time
-beam tagging without the Teacher's hardware overhead.
-
-This is the essence of *knowledge distillation*: compress the
-Teacher's expertise into a lightweight, deployable model.
+The **Student** is our XGBoost model. It only sees the shape of a single
+detector pulse (how fast it rises, how wide it is, how long the tail is)
+but learns to match the Teacher's answers. After training, it can classify
+a particle in under a millisecond — fast enough to keep up with the beam
+in real time.
                 """
             )
 
-        with st.expander("Why hunt for Kaons?", expanded=False):
+        with st.expander("Why are kaons special?", expanded=False):
             st.markdown(
                 r"""
-At **5–10 GeV/c** in the CERN T9 secondary beam, $K^-$ mesons
-comprise only **~1.5 %** of all beam particles.  Yet kaons are
-scientifically coveted:
+In the T9 beam at **5–10 GeV/c**, kaons ($K^-$) make up only about
+**1.5%** of all particles. The rest are mostly pions. Finding those kaons
+is tricky because their pulses look similar — but kaons have a slightly
+slower rise and a longer tail, because they lose energy differently in
+the scintillator material.
 
-- They are the lightest strange-quark carriers, offering a clean
-  probe of **QCD strangeness production**.
-- Their hadronic interactions in a scintillator produce a
-  characteristically **slower rise time** and **longer decay tail**
-  compared to pions — exactly what the pulse-shape features capture.
-- Contamination from misidentified pions is the dominant systematic
-  — the XGBoost model is explicitly optimised to maximise the
-  **Pion Rejection Factor (PRF)**.
-
-Spotting a $K^-$ in a flood of $\pi^-$ is like identifying one
-Turkish coffee bean in a sack of espresso.
+The model is specifically tuned to catch kaons without misidentifying
+too many pions as them. That trade-off is measured by the
+**Pion Rejection Factor** — the higher it is, the cleaner our kaon sample.
                 """
             )
 
         st.divider()
-        st.caption(
-            "Follow us from anywhere — this dashboard is designed "
-            "to load on a mobile phone. No CERN VPN needed."
-        )
+        st.caption("No VPN needed. Works on mobile.")
 
 
 
 def _beam_status_banner(df: pl.DataFrame | None) -> None:
-    if df is not None and len(df) > 0:
-        label, colour = "LIVE", "green"
-    else:
+    if df is None or len(df) == 0:
         label, colour = "OFFLINE", "red"
+    else:
+        latest_ns = df["nanosecond_timestamp"].max()
+        age_s = (time.time() * 1e9 - latest_ns) / 1e9
+        if age_s < 90:
+            label, colour = "LIVE", "green"
+        elif age_s < 300:
+            label, colour = "STANDBY", "orange"
+        else:
+            label, colour = "OFFLINE", "red"
     st.markdown(
         f"<div style='text-align:center; padding:6px 0; "
         f"background:rgba(0,0,0,0.08); border-radius:6px'>"
@@ -250,11 +244,8 @@ def main() -> None:
 
     _science_corner()
 
-    st.title("XGBPID — Live Global")
-    st.caption(
-        "Real-time particle identification on the CERN T9 beamline, "
-        "open to the world."
-    )
+    st.title("XGBPID — Live")
+    st.caption("Real particle data from the T9 beamline at CERN, updated every 60 seconds.")
 
     df = _load_telemetry()
 
@@ -263,9 +254,8 @@ def main() -> None:
 
     if df is None or len(df) == 0:
         st.info(
-            "Waiting for the first telemetry flush…\n\n"
-            "The run will populate this dashboard automatically "
-            "once the acquisition loop starts.",
+            "No data yet — the run hasn't started or the upload hasn't come through. "
+            "Check back in a moment.",
             icon="📡",
         )
         time.sleep(5)

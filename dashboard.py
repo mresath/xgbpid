@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -46,6 +47,11 @@ def _parse_args() -> argparse.Namespace:
 _cfg           = _load_config(_parse_args().config)
 _TELEMETRY_PATH      = Path(_cfg["logging"]["output_dir"]).parent / "live_telemetry.parquet"
 _KAON_TELEMETRY_PATH = Path(_cfg["logging"]["output_dir"]).parent / "kaon_telemetry.parquet"
+_DATA_DIR       = Path(_cfg["logging"]["output_dir"]).parent
+_MODEL_PATH     = Path(_cfg["model"]["path"])
+_PAUSE_FILE     = _DATA_DIR / "retrain.pause"
+_STATUS_FILE    = _DATA_DIR / "retrain_status.json"
+_RETRAIN_INTERVAL_S = int(_cfg.get("retraining", {}).get("interval_seconds", 120))
 _CONF_THRESHOLD = float(_cfg["model"]["confidence_threshold"])
 _DEFAULT_REFRESH = int(_cfg["dashboard"]["refresh_seconds"])
 _DEFAULT_WINDOW  = int(_cfg["dashboard"]["latency_window_events"])
@@ -63,6 +69,25 @@ def _load(path_str: str) -> pl.DataFrame | None:
         return pl.read_parquet(p)
     except Exception:
         return None
+
+
+def _load_retrain_status() -> dict | None:
+    """Read the retrainer status JSON, returning None if not yet written."""
+    if not _STATUS_FILE.exists():
+        return None
+    try:
+        return json.loads(_STATUS_FILE.read_text())
+    except Exception:
+        return None
+
+
+def _set_retrain_paused(paused: bool) -> None:
+    """Write or remove the sentinel file that pauses the retrainer process."""
+    if paused:
+        _PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _PAUSE_FILE.touch()
+    elif _PAUSE_FILE.exists():
+        _PAUSE_FILE.unlink()
 
 
 def _metric_row(df: pl.DataFrame) -> None:
@@ -299,6 +324,54 @@ def _latest_events_table(df: pl.DataFrame, n: int = 20) -> pl.DataFrame:
     )
 
 
+def _retrain_status_panel(paused: bool) -> None:
+    """Show current model file age, retraining cycle info, and feature importance."""
+    status = _load_retrain_status()
+    model_mtime = _MODEL_PATH.stat().st_mtime if _MODEL_PATH.exists() else None
+
+    if paused:
+        st.warning("Retraining is **paused** — the live model is frozen.", icon="⏸️")
+    else:
+        st.success("Retraining is **active**.", icon="⚡")
+
+    r1, r2, r3, r4 = st.columns(4)
+    if model_mtime is not None:
+        age_s = time.time() - model_mtime
+        age_str = f"{int(age_s)}s ago" if age_s < 120 else f"{int(age_s/60)}m ago"
+        r1.metric("Model last updated", age_str)
+    else:
+        r1.metric("Model last updated", "unknown")
+
+    if status:
+        r2.metric("Retrain cycles", str(status["cycle"]))
+        r3.metric("Mode", status["mode"].capitalize())
+        next_s = max(0, int(status["interval_s"] - (time.time() - status["last_retrain"])))
+        next_str = f"{next_s}s" if not paused else "Paused"
+        r4.metric("Next cycle in", next_str)
+
+        importance = status.get("feature_importance", {})
+        if importance:
+            imp_df = (
+                pl.DataFrame({"feature": list(importance.keys()), "gain": list(importance.values())})
+                .sort("gain", descending=True)
+            )
+            fig = px.bar(
+                imp_df.to_pandas(),
+                x="gain",
+                y="feature",
+                orientation="h",
+                color_discrete_sequence=["#6DB8B8"],
+                labels={"gain": "Importance (gain)", "feature": ""},
+                title="Feature Importance — Latest Trained Model",
+            )
+            fig.update_layout(margin=dict(t=40, b=10), yaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        r2.metric("Retrain cycles", "0")
+        r3.metric("Mode", "—")
+        r4.metric("Next cycle in", f"{_RETRAIN_INTERVAL_S}s" if not paused else "paused")
+
+
 def _kaon_panel(kaon_df: pl.DataFrame) -> None:
     """Dedicated section for the kaon stream.
 
@@ -406,6 +479,19 @@ def main() -> None:
         st.divider()
         st.subheader("Validation Mode")
         validation_mode = st.toggle("Enable Validation Mode", value=False)
+        if validation_mode:
+            st.caption("Retraining is automatically paused while validation is active.")
+
+        st.divider()
+        st.subheader("Retraining")
+        manual_pause = st.toggle(
+            "Pause retraining",
+            value=_PAUSE_FILE.exists(),
+            disabled=validation_mode,
+            help="Pause the periodic retrainer. Automatically forced on by Validation Mode.",
+        )
+        retraining_paused = validation_mode or manual_pause
+        _set_retrain_paused(retraining_paused)
 
     st.title("XGBPID — Live Monitor")
     st.caption(f"Telemetry file: `{telemetry_path}`")
@@ -428,6 +514,10 @@ def main() -> None:
     st.caption(f"Showing **{len(df):,}** events — refreshes every {refresh_s} s")
 
     _metric_row(df)
+    st.divider()
+
+    with st.expander("Model & Retraining", expanded=not retraining_paused):
+        _retrain_status_panel(retraining_paused)
     st.divider()
 
     if validation_mode:

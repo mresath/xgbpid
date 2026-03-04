@@ -5,6 +5,6 @@
 - [x] Script that launches both files simulatenously
 - [x] Add test mode & accuracy metrics
 - [x] Add more particle types if found feasible
-- [ ] Implement real-time training
+- [x] Implement real-time training (re-training)
 - [ ] Brainstorm, outline and implement online publishing
 - [ ] Clean readme with a simple overview than detailed explanations

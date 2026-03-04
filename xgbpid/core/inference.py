@@ -5,7 +5,7 @@ Loads a pre-trained model from disk and maps a FeatureVector to a particle
 label (pion / electron / kaon) with an associated confidence score.
 
 predict() takes the argmax of the probability vector as the class label and the
-corresponding probability as confidence.  The label-to-name mapping is loaded
+corresponding probability as confidence. The label-to-name mapping is loaded
 dynamically from the YAML config, so adding new particle classes requires no
 code changes here.
 
@@ -13,6 +13,7 @@ The model file is expected to be JSON format produced by xgb.Booster.save_model(
 """
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,8 @@ import xgboost as xgb
 from xgbpid.core.processor import FeatureVector
 
 log = logging.getLogger(__name__)
+
+_RELOAD_CHECK_S: float = 2.0  # stat() the model file at most once every 2 seconds
 
 
 @dataclass
@@ -53,10 +56,13 @@ class PIDClassifier:
                 f"Model not found at '{model_path}'. "
                 "Train and export a model first (see scripts/train.py)."
             )
-        self._booster = xgb.Booster()
-        self._booster.load_model(str(model_path))
+        self._model_path = model_path
         self._labels = labels
         self._threshold = confidence_threshold
+        self._booster = xgb.Booster()
+        self._booster.load_model(str(model_path))
+        self._model_mtime: float = model_path.stat().st_mtime
+        self._last_reload_check: float = time.monotonic()
         log.info("Loaded PID model from '%s' (threshold=%.2f).", model_path, confidence_threshold)
 
     @classmethod
@@ -76,6 +82,7 @@ class PIDClassifier:
         DMatrix and output_margin=False on a multi-class model, so we take
         argmax for the label and the corresponding probability for confidence.
         """
+        self._maybe_reload()
         x = fv.to_array().reshape(1, -1)
         dmat = xgb.DMatrix(x, feature_names=FeatureVector.feature_names())
 
@@ -99,3 +106,24 @@ class PIDClassifier:
             confidence=confidence,
             above_threshold=confidence >= self._threshold,
         )
+
+    def _maybe_reload(self) -> None:
+        """Reload the booster from disk if the model file has been replaced since last load.
+
+        The check is rate-limited to once every _RELOAD_CHECK_S seconds so that
+        os.stat() never appears on the < 1 ms hot path.
+        """
+        now = time.monotonic()
+        if now - self._last_reload_check < _RELOAD_CHECK_S:
+            return
+        self._last_reload_check = now
+        try:
+            mtime = self._model_path.stat().st_mtime
+        except OSError:
+            return
+        if mtime != self._model_mtime:
+            new_booster = xgb.Booster()
+            new_booster.load_model(str(self._model_path))
+            self._booster = new_booster
+            self._model_mtime = mtime
+            log.info("Model hot-reloaded from '%s'.", self._model_path)

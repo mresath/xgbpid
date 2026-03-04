@@ -21,12 +21,41 @@ def _run_main(config: str) -> None:
     main.main()
 
 
+def _run_retrain(config: str) -> None:
+    """Target for the periodic retrainer process."""
+    import logging
+    import yaml
+    from pathlib import Path
+    from scripts.train import retrain_loop
+
+    logging.basicConfig(
+        format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+        level=logging.INFO,
+    )
+    cfg = yaml.safe_load(open(config))
+    rt = cfg.get("retraining", {})
+    retrain_loop(
+        cfg=cfg,
+        interval_s=int(rt.get("interval_seconds", 120)),
+        output_path=Path(cfg["model"]["path"]),
+        n_events=int(rt.get("n_events", 30_000)),
+    )
+
+
 def run(config: str = "configs/experiment_v1.yaml", port: int = 8501) -> None:
-    """Launch the loop and the dashboard in parallel."""
+    """Launch the acquisition loop, the retrainer, and the dashboard in parallel."""
     main_proc = multiprocessing.Process(
         target=_run_main,
         args=(config,),
         name="main-loop",
+        daemon=True,
+    )
+
+    retrain_proc = multiprocessing.Process(
+        target=_run_retrain,
+        args=(config,),
+        name="retrain-loop",
         daemon=True,
     )
 
@@ -41,8 +70,10 @@ def run(config: str = "configs/experiment_v1.yaml", port: int = 8501) -> None:
     )
 
     main_proc.start()
+    retrain_proc.start()
     print(f"[runner] Main loop started  (pid {main_proc.pid})")
-    print(f"[runner] Dashboard started          (pid {dash_proc.pid}, port {port})")
+    print(f"[runner] Retrainer started  (pid {retrain_proc.pid})")
+    print(f"[runner] Dashboard started  (pid {dash_proc.pid}, port {port})")
 
     try:
         main_proc.join()
@@ -52,6 +83,9 @@ def run(config: str = "configs/experiment_v1.yaml", port: int = 8501) -> None:
         if main_proc.is_alive():
             main_proc.terminate()
             main_proc.join(timeout=5)
+        if retrain_proc.is_alive():
+            retrain_proc.terminate()
+            retrain_proc.join(timeout=5)
         if dash_proc.poll() is None:
             dash_proc.terminate()
             try:

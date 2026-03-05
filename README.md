@@ -256,16 +256,22 @@ If either variable is missing, the relay silently disables itself and the rest o
 
 ```
 xgbpid/
+├── assets/                    # assets such as the team logo
 ├── configs/
 │   └── experiment_v1.yaml     # all experiment parameters
+├── dashboard.py               # local dashboard
 ├── public/  
     ├── dashboard.py           # public dashboard
-├── dashboard.py               # local dashboard
 ├── main.py                    # acquisition loop
 ├── runner.py                  # process launcher (start here)
 ├── logs/                      # timestamped log files (one per run, gitignored)
 ├── models/
 │   └── xgbpid.json            # trained XGBoost model
+├── data/                      # telemetry files
+│   └── runs/
+│   └── live_telemetry.parquet
+│   └── kaon_telemetry.parquet
+│   └── retrain_status.json
 ├── scripts/
 │   └── train.py               # model training & background retrainer
 └── xgbpid/core/

@@ -175,7 +175,7 @@ def _confidence_heatmap(df: pl.DataFrame) -> None:
 
 def _science_corner() -> None:
     with st.sidebar:
-        st.title("XGBPID")
+        st.title("XGBPID - Team QuaRC")
         st.caption("Live Global Dashboard")
         st.divider()
         st.subheader("🔬 Background")
@@ -237,14 +237,15 @@ def _beam_status_banner(df: pl.DataFrame | None) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="XGBPID | Live Global",
+        page_title="XGBPID | Live",
+        page_icon="assets/quarc-circular.png",
         layout="wide",
         initial_sidebar_state="expanded",
     )
 
     _science_corner()
 
-    st.title("XGBPID — Live")
+    st.title("Live Global")
     st.caption("Real particle data from the T9 beamline at CERN, updated every 60 seconds.")
 
     df = _load_telemetry()

@@ -491,11 +491,12 @@ def _kaon_panel(kaon_df: pl.DataFrame) -> None:
 def main() -> None:
     st.set_page_config(
         page_title="XGBPID | Live",
+        page_icon="assets/quarc-circular.png",
         layout="wide",
     )
 
     with st.sidebar:
-        st.title("XGBPID")
+        st.title("XGBPID - Team QuaRC")
         st.divider()
 
         st.subheader("Telemetry source")
@@ -544,7 +545,7 @@ def main() -> None:
         retraining_paused = validation_mode or manual_pause
         _set_retrain_paused(retraining_paused)
 
-    st.title("XGBPID — Live Monitor")
+    st.title("Live Monitor")
     st.caption(f"Telemetry file: `{telemetry_path}`")
 
     df = _load(telemetry_path)

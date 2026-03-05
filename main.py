@@ -92,12 +92,25 @@ def _log_validation_metrics(
     )
 
 
-def _setup_logging(level: str) -> None:
-    logging.basicConfig(
-        format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+def _setup_logging(level: str, log_dir: Path) -> Path:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"run_{time.strftime('%Y%m%d_%H%M%S')}.log"
+
+    fmt = logging.Formatter(
+        "%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
         datefmt="%H:%M:%S",
-        level=getattr(logging, level.upper(), logging.INFO),
     )
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(fmt)
+
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    root.addHandler(console)
+    root.addHandler(file_handler)
+
+    return log_path
 
 
 def _load_config(path: str) -> dict:
@@ -219,6 +232,8 @@ def run(cfg: dict) -> None:
         finally:
             _write_live_telemetry(rows, live_path, rolling_window)  # flush remainder
             _write_kaon_telemetry(kaon_rows, kaon_live_path)
+            for handler in logging.getLogger().handlers:
+                handler.flush()
 
     if rows:
         run_ts  = time.strftime("%Y%m%d_%H%M%S")
@@ -239,7 +254,11 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = _load_config(args.config)
-    _setup_logging(cfg["logging"]["level"])
+    log_path = _setup_logging(
+        cfg["logging"]["level"],
+        Path(cfg["logging"].get("log_dir", "logs")),
+    )
+    log.info("Log file: '%s'.", log_path)
     run(cfg)
 
 

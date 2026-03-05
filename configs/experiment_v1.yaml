@@ -56,6 +56,7 @@ processing:
 logging:
   level: "INFO"
   output_dir: "data/runs"
+  log_dir: "logs"
 
 dashboard:
   refresh_seconds: 2           # default auto-refresh interval shown in sidebar

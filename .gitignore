@@ -17,6 +17,10 @@ poetry.lock
 data/*
 !data/.gitkeep
 
+# Run logs
+logs/*
+!logs/.gitkeep
+
 # Ignore trained model binaries (keep them on local/cloud storage, not Git)
 models/*.bin
 models/*.json

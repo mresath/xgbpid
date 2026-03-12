@@ -295,3 +295,9 @@ Feature extraction and pile-up rejection settings, need to be tuned to the noise
 |---|---|---|
 | `enabled` | `true` | Enable Supabase upload for the public dashboard |
 | `upload_interval_seconds` | `60` | How often the relay thread uploads the Parquet snapshot |
+
+---
+
+## Copyright
+
+Distributed under the GNU GPLv3 License. See `LICENSE` for more information.
